@@ -1,0 +1,6 @@
+/bin/
+/build/
+*.log
+.DS_Store
+/lagra
+/dist/

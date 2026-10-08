@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Lagra</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="app-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4.6" r="2.1"/><path d="M12 6.7v14.2"/><path d="M8 9.8h8"/><path d="M4.6 14.2a7.4 7.4 0 0 0 14.8 0"/><path d="M4.6 14.2 3.4 12.4"/><path d="M19.4 14.2l1.2-1.8"/></svg></span>
+      <span>Lagra</span>
+    </div>
+    <nav class="nav-scroll">
+      <div class="section-head"><span>Storages</span><button class="add" data-view="new" title="Add storage" aria-label="Add storage" data-icon="plus"></button></div>
+      <ul id="mountlist" class="navlist"></ul>
+      <div class="section-head"><span>Accounts</span><button class="add" data-view="new-account" title="Add account" aria-label="Add account" data-icon="plus"></button></div>
+      <ul id="accountlist" class="navlist"></ul>
+    </nav>
+    <div class="nav-foot">
+      <button class="nav" data-view="general"><span class="nav-icon" data-icon="sliders"></span><span class="text"><span class="name">Settings</span></span></button>
+      <button class="nav" data-view="logs"><span class="nav-icon" data-icon="help"></span><span class="text"><span class="name">Help &amp; logs</span></span></button>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+# lagra configuration — the single source of truth for your mounts.
+#
+# Keep it in your dotfiles repo and symlink it to ~/.config/lagra/config.toml
+# (or point $LAGRA_CONFIG / --config at it). Edit it by hand or in the
+# settings window, which changes only the block you touched.
+# Changes are applied within seconds; an invalid file is rejected and the
+# running configuration stays active until you fix it.
+#
+# Paths accept "~" and "${ENV_VAR}" so one file works on several Macs.
+# Values shown here are the built-in defaults unless marked otherwise.
+
+[general]
+# debug | info | warn | error   (live change)
+log_level = "info"
+
+# Root of rclone's VFS cache. One directory for the whole process; rclone keeps
+# a subdirectory per mount underneath. Changing it needs a restart of lagra.
+cache_dir = "~/Library/Caches/lagra"
+
+# How often a local stat checks that each volume still answers.   (live change)
+mount_probe_interval = "15s"
+
+# How often the backend is asked a cheap question to tell "connected" from
+# "offline". Costs one request per mount per interval.             (live change)
+backend_probe_interval = "60s"
+
+# After this long with uploads still queued, one notification per mount.
+#                                                                   (live change)
+upload_stuck_after = "10m"
+
+# Install a LaunchAgent so lagra starts at login.                   (live change)
+launch_at_login = false
+
+[defaults]
+# Applied to every mount unless the mount sets its own value. Only lagra's own
+# mount fields and VFS options belong here — never backend options.
+
+# Where volumes are mounted when a mount has no mount_point: <mount_root>/<name>.
+# Keep it under your home: /Volumes needs root.
+mount_root = "~/Volumes"
+
+read_only = false
+enabled = true
+
+# Refuse ._* AppleDouble sidecars, .DS_Store, .Spotlight-V100, .fseventsd,
+# .Trashes and .TemporaryItems at the NFS layer and hide existing ones. NFSv3
+# has no extended attributes, so without this Finder litters buckets with them.
+hide_apple_files = true
+
+# VFS options are passed 1:1 to rclone (see `lagra options vfs`). Writing over
+# NFS needs a write cache; "full" is what rclone recommends. Uploads happen in
+# the background after vfs_write_back; lagra shows pending uploads per mount.
+[defaults.vfs]
+vfs_cache_mode = "full"
+dir_cache_time = "1m"
+vfs_cache_max_size = "10G"
+vfs_write_back = "5s"
+
+# ---------------------------------------------------------------------------
+# One [[account]] block per login, i.e. who you are: where its secrets come
+# from and the options its mounts share, such as the user name. Any number
+# of mounts use one account, so several buckets behind the same keys, or
+# several servers behind one login, need the secrets only once. An account
+# belongs to no backend: each mount names its own `type`, and one login can
+# serve SMB shares and WebDAV servers alike.
+# ---------------------------------------------------------------------------
+
+[[account]]
+name = "aws"                           # [a-z0-9][a-z0-9_-]*
+
+# Backend options are passed 1:1 to rclone and validated against rclone's own
+# metadata (`lagra options s3`); each mount gets the ones its backend knows.
+# Sensitive options (keys, tokens, passwords) are refused here — they must
+# come from [account.secrets].
+[account.options]
+provider = "AWS"
+region = "eu-central-1"
+# endpoint = "https://s3.eu-central-1.amazonaws.com"
+# env_auth = true                      # alternative: AWS credential chain instead of secrets
+# directory_markers = true             # lagra's default for S3: empty folders are kept as "name/" objects
+
+# One secret source per sensitive option:
+#   { keychain = true }               -> `lagra secret set aws access_key_id`
+#                                        (service "lagra", account "<account>/<option>")
+#   { command = ["op", "read", "op://Private/S3/secret"] }  -> stdout is the value
+#   optional: timeout = "10s" for command sources
+[account.secrets]
+access_key_id = { keychain = true }
+secret_access_key = { keychain = true }
+
+[[account]]
+name = "hetzner"
+[account.options]
+provider = "Hetzner"
+endpoint = "fsn1.your-objectstorage.com"
+region = "fsn1"
+[account.secrets]
+access_key_id = { command = ["op", "read", "op://Private/Hetzner S3/username"] }
+secret_access_key = { command = ["op", "read", "op://Private/Hetzner S3/credential"] }
+
+# Another backend type needs no new code — only rclone options.
+# rclone marks identifiers like host and user as "sensitive" (they are redacted
+# in bug reports). lagra refuses sensitive options in the file unless the
+# account lists them in `public`, which also covers its mounts' options; real
+# passwords and keys can never be public. The server is not part of the
+# login: each mount names it (see the mounts below).
+[[account]]
+name = "alice"
+public = ["host", "user"]
+[account.options]
+user = "alice"
+key_file = "~/.ssh/id_ed25519"        # rclone expands ~ itself for key_file
+[account.secrets]
+key_file_pass = { keychain = true }
+
+# One directory login for every file server of an organisation, over SMB
+# and WebDAV alike; `domain` only reaches the SMB mounts.
+[[account]]
+name = "company"
+public = ["host", "user", "domain"]
+[account.options]
+user = "alice"
+domain = "CORP"
+[account.secrets]
+pass = { keychain = true }
+
+# ---------------------------------------------------------------------------
+# One [[mount]] block per Finder volume. `name` is the identity: it names the
+# mount point, the menu entry and is the key for reloads. Renaming a mount is
+# treated as remove + add. `type` is the backend the mount speaks; the login
+# comes from the account; [mount.options] says what differs per mount,
+# typically the server, and overrides the account's options. Secrets never
+# go into a mount.
+# ---------------------------------------------------------------------------
+
+[[mount]]
+name = "archiv"                        # [a-z0-9][a-z0-9_-]*
+account = "aws"                        # the [[account]] it uses
+type = "s3"                            # a backend from `lagra backends`
+path = "my-bucket/archive"             # everything after the colon in rclone notation;
+                                       # object stores need the bucket here
+# mount_point = "~/Volumes/archiv"     # default: <mount_root>/<name>
+read_only = true                       # enforced by the VFS and by the NFS mount
+enabled = true                         # false: keep the block, do not mount
+
+# Per-mount VFS overrides.
+[mount.vfs]
+vfs_cache_max_size = "2G"
+
+[[mount]]
+name = "backup"
+account = "hetzner"
+type = "s3"
+path = "backup"
+enabled = false
+
+[[mount]]
+name = "server"
+account = "alice"
+type = "sftp"
+path = "/srv/data"                     # sftp: absolute, or relative to the login folder
+enabled = false
+[mount.options]
+host = "server.example.org"
+# port = 2222
+
+[[mount]]
+name = "team"
+account = "company"
+type = "smb"
+path = "Team$"                         # smb: the share, optionally followed by a folder
+enabled = false
+[mount.options]
+host = "files.example.org"
+
+[[mount]]
+name = "intranet"
+account = "company"                    # the same login, over WebDAV
+type = "webdav"
+enabled = false
+[mount.options]
+url = "https://dav.example.org/files"
