@@ -47,6 +47,10 @@ enabled = true
 # has no extended attributes, so without this Finder litters buckets with them.
 hide_apple_files = true
 
+# Probe intervals for every mount; unset, the [general] values apply.
+# mount_probe_interval = "15s"
+# backend_probe_interval = "60s"
+
 # VFS options are passed 1:1 to rclone (see `lagra options vfs`). Writing over
 # NFS needs a write cache; "full" is what rclone recommends. Uploads happen in
 # the background after vfs_write_back; lagra shows pending uploads per mount.
@@ -142,6 +146,12 @@ path = "my-bucket/archive"             # everything after the colon in rclone no
 # mount_point = "~/Volumes/archiv"     # default: <mount_root>/<name>
 read_only = true                       # enforced by the VFS and by the NFS mount
 enabled = true                         # false: keep the block, do not mount
+
+# Like read_only and enabled, these override [defaults] for this mount; the
+# probe intervals fall back to [general].
+# hide_apple_files = false
+# mount_probe_interval = "15s"
+# backend_probe_interval = "5m"        # fewer requests to a metered store
 
 # Per-mount VFS overrides.
 [mount.vfs]
