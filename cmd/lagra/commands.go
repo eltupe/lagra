@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -110,9 +111,11 @@ func statusCmd() *cobra.Command {
 				return err
 			}
 			if asJSON {
-				enc := json.NewEncoder(os.Stdout)
-				enc.SetIndent("", "  ")
-				return enc.Encode(st)
+				if err := json.MarshalWrite(os.Stdout, st, ipc.JSONOut, jsontext.WithIndent("  ")); err != nil {
+					return err
+				}
+				fmt.Println()
+				return nil
 			}
 			fmt.Printf("lagra %s (pid %d), up %s\n", st.Version, st.PID, time.Since(st.StartedAt).Round(time.Second))
 			fmt.Printf("config: %s", st.ConfigPath)

@@ -9,7 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -161,6 +161,7 @@ func (s *Server) handler() http.Handler {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 				return
 			}
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 			out, err := fn(r)
 			if err != nil {
 				var ve *settings.ValidationError
@@ -377,12 +378,11 @@ type badRequestError struct{ err error }
 func (e *badRequestError) Error() string { return "bad request: " + e.err.Error() }
 func (e *badRequestError) Unwrap() error { return e.err }
 
+// decode reads a request body strictly: a member the input type does not
+// know is refused rather than dropped, so that the page and the server
+// cannot drift apart unnoticed.
 func decode(r *http.Request, v any) error {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, v); err != nil {
+	if err := json.UnmarshalRead(r.Body, v, json.RejectUnknownMembers(true)); err != nil {
 		return &badRequestError{err}
 	}
 	return nil
@@ -391,7 +391,7 @@ func decode(r *http.Request, v any) error {
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
+	_ = json.MarshalWrite(w, v, ipc.JSONOut)
 }
 
 // signingInfo asks codesign about the running executable's bundle, once.

@@ -12,7 +12,8 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -123,10 +124,10 @@ func linkedModules(pkg string) ([]module, error) {
 		return nil, fmt.Errorf("go list: %w", err)
 	}
 	seen := map[string]module{}
-	dec := json.NewDecoder(bytes.NewReader(out))
+	dec := jsontext.NewDecoder(bytes.NewReader(out))
 	for {
 		var p struct{ Module *module }
-		if err := dec.Decode(&p); errors.Is(err, io.EOF) {
+		if err := json.UnmarshalDecode(dec, &p); errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
 			return nil, err

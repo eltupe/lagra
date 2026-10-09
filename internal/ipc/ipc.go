@@ -5,7 +5,8 @@ package ipc
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -32,7 +33,7 @@ type Status struct {
 	ConfigOK    bool      `json:"config_ok"`
 	ConfigError string    `json:"config_error,omitempty"`
 	// ConfigMissing: no config file yet, Settings creates one.
-	ConfigMissing bool              `json:"config_missing,omitempty"`
+	ConfigMissing bool              `json:"config_missing,omitzero"`
 	LoadedAt      time.Time         `json:"config_loaded_at"`
 	Overall       engine.Overall    `json:"overall"`
 	Mounts        []engine.Snapshot `json:"mounts"`
@@ -199,10 +200,16 @@ func (s *Server) handleErr(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
+// JSONOut are the options for every answer: map keys sorted, as the legacy
+// encoder did, and invalid UTF-8 (a file name from the storage can carry
+// some, for example in an error message) replaced instead of failing the
+// answer halfway.
+var JSONOut = json.JoinOptions(json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
+	_ = json.MarshalWrite(w, v, JSONOut)
 }
 
 // Client talks to the daemon.

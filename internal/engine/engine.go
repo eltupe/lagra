@@ -119,13 +119,13 @@ type Snapshot struct {
 	State      State          `json:"state"`
 	Since      time.Time      `json:"since"`
 	Enabled    bool           `json:"enabled"`
-	Manual     bool           `json:"manual,omitempty"` // disconnected by the user
+	Manual     bool           `json:"manual,omitzero"` // disconnected by the user
 	MountPoint string         `json:"mount_point"`
-	Port       int            `json:"port,omitempty"`
+	Port       int            `json:"port,omitzero"`
 	Uploads    int            `json:"uploads"`
-	Stuck      bool           `json:"uploads_stuck,omitempty"`
+	Stuck      bool           `json:"uploads_stuck,omitzero"`
 	LastError  string         `json:"last_error,omitempty"`
-	Attempt    int            `json:"attempt,omitempty"`
+	Attempt    int            `json:"attempt,omitzero"`
 	NextRetry  time.Time      `json:"next_retry,omitzero"`
 	Pending    *PendingChange `json:"pending,omitempty"`
 	LastProbe  time.Time      `json:"last_probe,omitzero"`

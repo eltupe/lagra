@@ -5,7 +5,8 @@
 package state
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -88,7 +89,7 @@ func (s *Store) save(f *File) error {
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
 		return fmt.Errorf("state dir: %w", err)
 	}
-	raw, err := json.MarshalIndent(f, "", "  ")
+	raw, err := json.Marshal(f, jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		return err
 	}

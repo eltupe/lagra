@@ -3,7 +3,7 @@ package webui
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"log/slog"
@@ -189,18 +189,32 @@ func TestAPIFlow(t *testing.T) {
 // other failure is ours (500, logged).
 func TestErrorResponses(t *testing.T) {
 	var logged bytes.Buffer
-	srv, _, _ := startServer(t, func(d *Deps) { d.Log = slog.New(slog.NewTextHandler(&logged, nil)) })
-	r, _ := http.NewRequest("PUT", "http://"+srv.addr+"/api/accounts/aws", strings.NewReader(`{"name": `))
-	r.Header.Set("X-Lagra-Token", srv.token)
-	resp, err := http.DefaultClient.Do(r)
-	if err != nil {
-		t.Fatal(err)
+	srv, cfg, _ := startServer(t, func(d *Deps) { d.Log = slog.New(slog.NewTextHandler(&logged, nil)) })
+	before, _ := os.ReadFile(cfg)
+	put := func(body string) int {
+		r, _ := http.NewRequest("PUT", "http://"+srv.addr+"/api/accounts/aws", strings.NewReader(body))
+		r.Header.Set("X-Lagra-Token", srv.token)
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest || logged.Len() != 0 {
-		t.Errorf("broken body: %d, log %q", resp.StatusCode, logged.String())
+	for _, body := range []string{
+		`{"name": `,                    // cut off
+		`{"name": "aws", "nmae": "x"}`, // a member AccountInput does not have
+		`{"name": "aws"} {}`,           // two values
+		`{"name": "` + strings.Repeat("x", 1<<20) + `"}`,
+	} {
+		if code := put(body); code != http.StatusBadRequest {
+			t.Errorf("body %.40q: %d, want 400", body, code)
+		}
 	}
-	resp, _ = req(t, srv, "GET", "/api/meta/options/nope", srv.token, nil)
+	if after, _ := os.ReadFile(cfg); !bytes.Equal(before, after) || logged.Len() != 0 {
+		t.Errorf("a refused body changed the file or was logged: %q", logged.String())
+	}
+	resp, _ := req(t, srv, "GET", "/api/meta/options/nope", srv.token, nil)
 	if resp.StatusCode != http.StatusInternalServerError || !strings.Contains(logged.String(), "path=/api/meta/options/nope") {
 		t.Errorf("server error: %d, log %q", resp.StatusCode, logged.String())
 	}
