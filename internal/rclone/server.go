@@ -153,10 +153,9 @@ func Start(ctx context.Context, spec Spec) (*Server, error) {
 	// volume, and a rejected login would be repeated by every request.
 	// Any other error (offline, no list permission) is left to the probe,
 	// so that the volume can still come up offline.
-	var lr *LoginRejectedError
 	if err := loginRejected(checkRoot(ctx, f)); errors.Is(err, fs.ErrorDirNotFound) || smbShareMissing(err) {
 		return nil, &PathNotFoundError{Path: spec.Path}
-	} else if errors.As(err, &lr) {
+	} else if _, ok := errors.AsType[*LoginRejectedError](err); ok {
 		return nil, err
 	} else if err != nil {
 		fs.Debugf(nil, "lagra: checking %s:%s: %v", spec.Type, spec.Path, err)

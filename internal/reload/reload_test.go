@@ -121,8 +121,7 @@ func TestPollFallback(t *testing.T) {
 	atomicWrite(t, p, "a = 1\n")
 	var n int32
 	w := &Watcher{Path: p, Debounce: time.Hour, PollInterval: 30 * time.Millisecond, OnChange: func() { atomic.AddInt32(&n, 1) }}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go func() { _ = w.Run(ctx) }()
 	time.Sleep(40 * time.Millisecond)
 	// write in place (not via rename) then rely on polling since debounce is huge

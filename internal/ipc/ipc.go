@@ -67,7 +67,7 @@ type Controller interface {
 	// apply.
 	RestartAccount(account string) []string
 	// Sync expedites pending uploads of one mount and refreshes its listing.
-	Sync(name string) (SyncResult, error)
+	Sync(ctx context.Context, name string) (SyncResult, error)
 	Reload() ReloadResult
 	// Shutdown returns an error when uploads are pending and force is false.
 	Shutdown(force bool) error
@@ -140,7 +140,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		s.handleErr(w, s.Ctl.Disconnect(r.PathValue("name"), r.URL.Query().Get("force") == "1"))
 	})
 	mux.HandleFunc("POST /v1/mounts/{name}/sync", func(w http.ResponseWriter, r *http.Request) {
-		res, err := s.Ctl.Sync(r.PathValue("name"))
+		res, err := s.Ctl.Sync(r.Context(), r.PathValue("name"))
 		if err != nil {
 			s.handleErr(w, err)
 			return

@@ -12,7 +12,7 @@ func TestRotation(t *testing.T) {
 	r := &Rotating{Path: filepath.Join(dir, "lagra.log"), MaxBytes: 100, Keep: 2}
 	defer r.Close()
 	line := strings.Repeat("x", 40) + "\n"
-	for i := 0; i < 8; i++ { // 8*41 bytes → several rotations
+	for range 8 { // 8*41 bytes → several rotations
 		if _, err := r.Write([]byte(line)); err != nil {
 			t.Fatal(err)
 		}

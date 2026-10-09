@@ -32,8 +32,10 @@ func (f *fakeCtl) Disconnect(name string, force bool) error {
 	f.force = force
 	return nil
 }
-func (f *fakeCtl) RestartAccount(string) []string       { return []string{"a"} }
-func (f *fakeCtl) Sync(name string) (SyncResult, error) { return SyncResult{Expedited: 1}, nil }
+func (f *fakeCtl) RestartAccount(string) []string { return []string{"a"} }
+func (f *fakeCtl) Sync(context.Context, string) (SyncResult, error) {
+	return SyncResult{Expedited: 1}, nil
+}
 func (f *fakeCtl) Reload() ReloadResult {
 	return ReloadResult{OK: false, Issues: []string{"line 3: bad"}}
 }
@@ -49,8 +51,7 @@ func TestRoundTrip(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "m.sock")
 	ctl := &fakeCtl{}
 	srv := &Server{Socket: sock, Ctl: ctl}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go func() { _ = srv.ListenAndServe(ctx) }()
 	deadline := time.Now().Add(2 * time.Second)
 	for !Ping(sock) && time.Now().Before(deadline) {

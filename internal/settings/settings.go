@@ -197,8 +197,7 @@ func (s *Service) Load(ctx context.Context) (*View, error) {
 	v.Exists = true
 	doc, err := config.Parse(s.Path, raw)
 	if err != nil {
-		var is *config.Issue
-		if errors.As(err, &is) {
+		if is, ok := errors.AsType[*config.Issue](err); ok {
 			v.Issues = config.Issues{is}
 			return v, nil
 		}
@@ -531,10 +530,8 @@ func checkName(kind, name, oldName string, existing []string) error {
 	if name == oldName {
 		return nil
 	}
-	for _, n := range existing {
-		if n == name {
-			return invalid("name", fmt.Sprintf("an %s named %q already exists", kind, name))
-		}
+	if slices.Contains(existing, name) {
+		return invalid("name", fmt.Sprintf("an %s named %q already exists", kind, name))
 	}
 	return nil
 }
@@ -623,8 +620,7 @@ func toMount(in MountInput) (config.Mount, error) {
 func (s *Service) validate(edited string) error {
 	doc, err := config.Parse(s.Path, []byte(edited))
 	if err != nil {
-		var is *config.Issue
-		if errors.As(err, &is) {
+		if is, ok := errors.AsType[*config.Issue](err); ok {
 			return &ValidationError{Issues: config.Issues{is}}
 		}
 		return err

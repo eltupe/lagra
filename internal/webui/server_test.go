@@ -24,12 +24,14 @@ type fakeCtl struct{ connected []string }
 func (f *fakeCtl) Status() ipc.Status {
 	return ipc.Status{Version: "t", ConfigOK: true, Overall: engine.OverallOK, Mounts: []engine.Snapshot{{Name: "archiv", State: engine.Connected}}}
 }
-func (f *fakeCtl) Connect(name string) error           { f.connected = append(f.connected, name); return nil }
-func (f *fakeCtl) Disconnect(string, bool) error       { return nil }
-func (f *fakeCtl) RestartAccount(string) []string      { return nil }
-func (f *fakeCtl) Sync(string) (ipc.SyncResult, error) { return ipc.SyncResult{Expedited: 1}, nil }
-func (f *fakeCtl) Reload() ipc.ReloadResult            { return ipc.ReloadResult{OK: true} }
-func (f *fakeCtl) Shutdown(bool) error                 { return nil }
+func (f *fakeCtl) Connect(name string) error      { f.connected = append(f.connected, name); return nil }
+func (f *fakeCtl) Disconnect(string, bool) error  { return nil }
+func (f *fakeCtl) RestartAccount(string) []string { return nil }
+func (f *fakeCtl) Sync(context.Context, string) (ipc.SyncResult, error) {
+	return ipc.SyncResult{Expedited: 1}, nil
+}
+func (f *fakeCtl) Reload() ipc.ReloadResult { return ipc.ReloadResult{OK: true} }
+func (f *fakeCtl) Shutdown(bool) error      { return nil }
 
 func reg() *config.StaticRegistry {
 	return &config.StaticRegistry{

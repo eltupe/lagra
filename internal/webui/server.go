@@ -9,7 +9,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,12 +85,7 @@ func New(deps Deps) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		_ = ln.Close()
-		return nil, err
-	}
-	return &Server{deps: deps, token: hex.EncodeToString(b[:]), addr: ln.Addr().String(), ln: ln}, nil
+	return &Server{deps: deps, token: rand.Text(), addr: ln.Addr().String(), ln: ln}, nil
 }
 
 // URL returns the address to open, token included.
@@ -263,7 +257,7 @@ func (s *Server) handler() http.Handler {
 		return nil, s.deps.Ctl.Disconnect(r.PathValue("name"), r.URL.Query().Get("force") == "1")
 	})
 	api("POST /api/mounts/{name}/sync", func(r *http.Request) (any, error) {
-		return s.deps.Ctl.Sync(r.PathValue("name"))
+		return s.deps.Ctl.Sync(r.Context(), r.PathValue("name"))
 	})
 	api("POST /api/reload", func(r *http.Request) (any, error) {
 		return s.deps.Ctl.Reload(), nil

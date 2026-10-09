@@ -196,11 +196,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.Reload()
 
 	var wg sync.WaitGroup
-	run := func(f func()) {
-		wg.Add(1)
-		go func() { defer wg.Done(); f() }()
-	}
-	run(func() {
+	wg.Go(func() {
 		w := &reload.Watcher{Path: a.cfgPath, Log: a.log, OnChange: func() {
 			r := a.Reload()
 			if r.OK {
@@ -211,31 +207,31 @@ func (a *App) Run(ctx context.Context) error {
 			a.log.Error("config watcher stopped", "err", err.Error())
 		}
 	})
-	run(func() {
+	wg.Go(func() {
 		engine.WakeWatcher{OnWake: func(gap time.Duration) {
 			a.log.Info("wake detected", "gap", gap.String())
 			a.mgr.ProbeAll()
 		}}.Run(ctx)
 	})
-	run(func() {
+	wg.Go(func() {
 		engine.NetWatcher{OnChange: func() {
 			a.log.Info("network change detected")
 			a.mgr.ProbeAll()
 		}}.Run(ctx)
 	})
-	run(func() {
+	wg.Go(func() {
 		if err := ctl.Serve(ctx, ctlLn); err != nil {
 			a.log.Error("control socket", "err", err.Error())
 		}
 	})
 	if a.web != nil {
-		run(func() {
+		wg.Go(func() {
 			if err := a.web.Serve(ctx); err != nil {
 				a.log.Error("settings server", "err", err.Error())
 			}
 		})
 	}
-	run(func() { a.statusTicker(ctx) })
+	wg.Go(func() { a.statusTicker(ctx) })
 
 	sigs := make(chan os.Signal, 2)
 	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
@@ -341,12 +337,12 @@ func (a *App) Disconnect(name string, force bool) error {
 }
 
 // Sync implements ipc.Controller.
-func (a *App) Sync(name string) (ipc.SyncResult, error) {
+func (a *App) Sync(ctx context.Context, name string) (ipc.SyncResult, error) {
 	c, ok := a.mgr.Get(name)
 	if !ok {
 		return ipc.SyncResult{}, fmt.Errorf("%w: %s", ipc.ErrNoMount, name)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	n, err := c.Sync(ctx)
 	if err != nil {

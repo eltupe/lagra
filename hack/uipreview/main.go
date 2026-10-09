@@ -205,7 +205,7 @@ func (f *fakeCtl) Disconnect(name string, force bool) error {
 	return f.set(name, func(s *engine.Snapshot) { s.State, s.Manual, s.Uploads = engine.Disconnected, true, 0 })
 }
 
-func (f *fakeCtl) Sync(name string) (ipc.SyncResult, error) {
+func (f *fakeCtl) Sync(_ context.Context, name string) (ipc.SyncResult, error) {
 	var n int
 	err := f.set(name, func(s *engine.Snapshot) { n, s.Uploads = s.Uploads, 0 })
 	return ipc.SyncResult{Expedited: n}, err

@@ -43,13 +43,13 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 func TestConcurrentUpdates(t *testing.T) {
 	s := &Store{Path: filepath.Join(t.TempDir(), "state.json")}
 	done := make(chan struct{})
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		go func(i int) {
 			defer func() { done <- struct{}{} }()
 			_ = s.Update(func(f *File) { f.Mounts[string(rune('a'+i))] = Managed{Name: "x"} })
 		}(i)
 	}
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		<-done
 	}
 	f, err := s.Load()

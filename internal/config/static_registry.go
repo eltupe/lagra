@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -79,10 +80,8 @@ func (s staticSet) Check(name, value string) error {
 		return fmt.Errorf("option %q: %q is not a valid %s", name, value, o.Type)
 	}
 	if o.Exclusive && len(o.Examples) > 0 {
-		for _, e := range o.Examples {
-			if e == value {
-				return nil
-			}
+		if slices.Contains(o.Examples, value) {
+			return nil
 		}
 		return fmt.Errorf("option %q: %q is not one of %v", name, value, o.Examples)
 	}

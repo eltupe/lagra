@@ -58,8 +58,7 @@ func validateCmd() *cobra.Command {
 			path, _ := config.Locate(configFlag)
 			doc, eff, issues, err := loadConfig()
 			if err != nil {
-				var is *config.Issue
-				if errors.As(err, &is) {
+				if is, ok := errors.AsType[*config.Issue](err); ok {
 					fmt.Fprintf(os.Stderr, "%s: %s\n", path, is.Error())
 					os.Exit(1)
 				}
@@ -266,11 +265,9 @@ func waitForState(cl *ipc.Client, name string, want ...engine.State) error {
 			if m.Name != name {
 				continue
 			}
-			for _, w := range want {
-				if m.State == w {
-					fmt.Printf("%s: %s (%s)\n", name, m.State, m.MountPoint)
-					return nil
-				}
+			if slices.Contains(want, m.State) {
+				fmt.Printf("%s: %s (%s)\n", name, m.State, m.MountPoint)
+				return nil
 			}
 			if m.Pending != nil {
 				fmt.Printf("%s: %s, change pending (%s)\n", name, m.State, m.Pending.Reason)

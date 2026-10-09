@@ -292,7 +292,7 @@ func (u *ui) act(action string) {
 	case "disconnect":
 		_ = u.app.Disconnect(arg, false)
 	case "sync":
-		go func() { _, _ = u.app.Sync(arg) }()
+		go func() { _, _ = u.app.Sync(context.Background(), arg) }()
 	case "open":
 		_ = exec.Command("/usr/bin/open", arg).Start()
 	case "reload":

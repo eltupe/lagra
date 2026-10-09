@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -36,8 +37,7 @@ func Parse(path string, raw []byte) (*Document, error) {
 	d := &Document{Path: path, lines: newLocator(raw)}
 	md, err := toml.Decode(string(raw), &d.File)
 	if err != nil {
-		var pe toml.ParseError
-		if errors.As(err, &pe) {
+		if pe, ok := errors.AsType[toml.ParseError](err); ok {
 			return nil, &Issue{Path: pe.LastKey, Line: pe.Position.Line, Msg: pe.Message}
 		}
 		return nil, fmt.Errorf("parse config: %w", err)
@@ -188,9 +188,9 @@ func (l *locator) find(start, end int, key string) int {
 			}
 		}
 	}
-	for s := len(segs) - 1; s >= 0; s-- {
-		re := regexp.MustCompile(`^\s*"?` + regexp.QuoteMeta(segs[s]) + `"?\s*=`)
-		inline := regexp.MustCompile(`[{,]\s*"?` + regexp.QuoteMeta(segs[s]) + `"?\s*=`)
+	for _, seg := range slices.Backward(segs) {
+		re := regexp.MustCompile(`^\s*"?` + regexp.QuoteMeta(seg) + `"?\s*=`)
+		inline := regexp.MustCompile(`[{,]\s*"?` + regexp.QuoteMeta(seg) + `"?\s*=`)
 		for n := start; n < end; n++ {
 			if re.MatchString(l.lines[n]) || inline.MatchString(l.lines[n]) {
 				return n + 1

@@ -132,8 +132,7 @@ func TestNetWatcherDetectsChange(t *testing.T) {
 		default:
 		}
 	}, Addrs: func() ([]string, error) { return addrs.Load().([]string), nil }}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go w.Run(ctx)
 	time.Sleep(15 * time.Millisecond)
 	addrs.Store([]string{"en0 10.0.0.2/24"})
@@ -223,8 +222,7 @@ func TestWakeWatcherSeesWallClockJump(t *testing.T) {
 		}
 		return base.Add(time.Duration(n) * 5 * time.Millisecond)
 	}}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go w.Run(ctx)
 	select {
 	case gap := <-woke:

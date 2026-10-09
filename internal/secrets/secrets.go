@@ -149,8 +149,7 @@ func (r *Resolver) Resolve(ctx context.Context, account string, sources map[stri
 	for _, option := range slices.Sorted(maps.Keys(sources)) {
 		v, err := r.one(ctx, account, option, sources[option])
 		if err != nil {
-			var missing *MissingError
-			if errors.As(err, &missing) {
+			if _, ok := errors.AsType[*MissingError](err); ok {
 				return nil, err
 			}
 			return nil, fmt.Errorf("account %q, secret %s: %w", account, option, err)

@@ -358,8 +358,7 @@ func TestSMBConnectsOnce(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "couldn't connect SMB") {
 		t.Fatalf("want a connect error, got %v", err)
 	}
-	var lr *LoginRejectedError
-	if errors.As(err, &lr) {
+	if _, ok := errors.AsType[*LoginRejectedError](err); ok {
 		t.Errorf("a refused connection is not a rejected login: %v", err)
 	}
 	if d := time.Since(start); d > 2*time.Second {

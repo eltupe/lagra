@@ -154,8 +154,8 @@ func render(alpha float64, b badge) []byte {
 	if b != badgeNone {
 		scale, off = 0.8, -0.5
 	}
-	for y := 0; y < iconSize; y++ {
-		for x := 0; x < iconSize; x++ {
+	for y := range iconSize {
+		for x := range iconSize {
 			p := pt{float64(x) + 0.5, float64(y) + 0.5}
 			q := pt{(p.x - off) / scale, (p.y - off) / scale}
 			a := anchorAlpha(q, 1) * alpha
