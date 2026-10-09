@@ -758,8 +758,11 @@
     const defaultPoint = n => `${state.view.defaults?.mount_root || '~/Volumes'}/${n || '<name>'}`;
     const mountPoint = text(m.mount_point, { placeholder: defaultPoint(m.name) });
     name.addEventListener('input', () => { mountPoint.placeholder = defaultPoint(name.value.trim()); });
-    const enabled = toggle(m.enabled !== false);
-    const readOnly = toggle(m.read_only === true);
+    // The switches show what applies, [defaults] included; a mount sets a
+    // value only where it differs from what it would inherit.
+    const inherited = { enabled: state.view.defaults?.enabled ?? true, read_only: state.view.defaults?.read_only ?? false };
+    const enabled = toggle(m.enabled ?? inherited.enabled);
+    const readOnly = toggle(m.read_only ?? inherited.read_only);
     page.append(section('On this Mac', h('div', { class: 'card' },
       row('Show in Finder at', h('div', { class: 'inline' }, mountPoint, pickButton(mountPoint)), 'Leave empty for the default folder.', { key: 'mount_point' }),
       toggleRow('Connect automatically', 'Mount this storage whenever Lagra runs.', enabled, 'enabled'),
@@ -795,8 +798,11 @@
       const body = {
         name: name.value.trim(), account: acctSel.value === NEW_ACCOUNT ? '' : acctSel.value, type, path: path.value.trim(),
         options: opts ? opts.values() : (m.options || {}), public: opts ? opts.public() : [], mount_point: mountPoint.value.trim(),
-        enabled: enabled.input.checked ? null : false, read_only: readOnly.input.checked ? true : null,
+        enabled: enabled.input.checked === inherited.enabled ? null : enabled.input.checked,
+        read_only: readOnly.input.checked === inherited.read_only ? null : readOnly.input.checked,
         hide_apple_files: hideApple.value === '' ? null : hideApple.value === 'true', vfs: vfsOut,
+        // Not on the form: kept as written, since a save replaces the block.
+        mount_probe_interval: m.mount_probe_interval || '', backend_probe_interval: m.backend_probe_interval || '',
       };
       if (newForm) body.new_account = newForm.values();
       return body;
