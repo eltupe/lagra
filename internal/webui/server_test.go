@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -40,13 +41,17 @@ func reg() *config.StaticRegistry {
 	}
 }
 
-func startServer(t *testing.T) (*Server, string, *fakeCtl) {
+func startServer(t *testing.T, opts ...func(*Deps)) (*Server, string, *fakeCtl) {
 	t.Helper()
 	cfg := filepath.Join(t.TempDir(), "config.toml")
 	_ = os.WriteFile(cfg, []byte("[general]\nlog_level = \"info\"\n\n[[account]]\nname = \"aws\"\n\n[[mount]]\nname = \"archiv\"\naccount = \"aws\"\ntype = \"s3\"\npath = \"b\"\n"), 0o644)
 	ctl := &fakeCtl{}
 	svc := &settings.Service{Path: cfg, Registry: reg(), Env: config.Env{Home: "/Users/t", LookupEnv: func(string) (string, bool) { return "", false }}}
-	srv, err := New(Deps{Settings: svc, Ctl: ctl, Registry: reg(), Backends: func() []Backend { return []Backend{{Name: "s3", Description: "S3"}} }, Version: "t"})
+	deps := Deps{Settings: svc, Ctl: ctl, Registry: reg(), Backends: func() []Backend { return []Backend{{Name: "s3", Description: "S3"}} }, Version: "t"}
+	for _, o := range opts {
+		o(&deps)
+	}
+	srv, err := New(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,6 +182,27 @@ func TestAPIFlow(t *testing.T) {
 	resp, body = req(t, srv, "GET", "/", tok, nil)
 	if resp.StatusCode != 200 || !strings.Contains(string(body), "<title>Lagra</title>") {
 		t.Errorf("index page: %d %.80s", resp.StatusCode, body)
+	}
+}
+
+// A body the server cannot read is the page's fault (400, not logged); any
+// other failure is ours (500, logged).
+func TestErrorResponses(t *testing.T) {
+	var logged bytes.Buffer
+	srv, _, _ := startServer(t, func(d *Deps) { d.Log = slog.New(slog.NewTextHandler(&logged, nil)) })
+	r, _ := http.NewRequest("PUT", "http://"+srv.addr+"/api/accounts/aws", strings.NewReader(`{"name": `))
+	r.Header.Set("X-Lagra-Token", srv.token)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || logged.Len() != 0 {
+		t.Errorf("broken body: %d, log %q", resp.StatusCode, logged.String())
+	}
+	resp, _ = req(t, srv, "GET", "/api/meta/options/nope", srv.token, nil)
+	if resp.StatusCode != http.StatusInternalServerError || !strings.Contains(logged.String(), "path=/api/meta/options/nope") {
+		t.Errorf("server error: %d, log %q", resp.StatusCode, logged.String())
 	}
 }
 

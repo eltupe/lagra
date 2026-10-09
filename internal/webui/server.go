@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -64,6 +65,8 @@ type Deps struct {
 	Backends func() []Backend
 	LogPath  string
 	Version  string
+	// Log receives server errors; nil means slog.Default().
+	Log *slog.Logger
 	// PickDirectory shows a native folder chooser; nil disables the button.
 	PickDirectory func(start string) (string, bool)
 	// Files replaces the embedded page files; hack/uipreview serves them
@@ -85,6 +88,9 @@ func New(deps Deps) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	if deps.Log == nil {
+		deps.Log = slog.Default()
+	}
 	return &Server{deps: deps, token: rand.Text(), addr: ln.Addr().String(), ln: ln}, nil
 }
 
@@ -93,7 +99,11 @@ func (s *Server) URL() string { return "http://" + s.addr + "/?t=" + s.token }
 
 // Serve blocks until ctx is done.
 func (s *Server) Serve(ctx context.Context) error {
-	srv := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{
+		Handler:           s.handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ErrorLog:          slog.NewLogLogger(s.deps.Log.Handler(), slog.LevelError),
+	}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(s.ln) }()
 	select {
@@ -154,12 +164,16 @@ func (s *Server) handler() http.Handler {
 			out, err := fn(r)
 			if err != nil {
 				var ve *settings.ValidationError
+				var br *badRequestError
 				switch {
 				case errors.As(err, &ve):
 					writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": ve.Error(), "issues": ve.Issues})
+				case errors.As(err, &br):
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				case errors.Is(err, ipc.ErrNoMount):
 					writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 				default:
+					s.deps.Log.Error("settings request failed", "method", r.Method, "path", r.URL.Path, "err", err.Error())
 					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				}
 				return
@@ -356,13 +370,20 @@ func sameOrigin(r *http.Request) bool {
 	return true
 }
 
+// badRequestError is a request body the server cannot use: 400, not
+// logged.
+type badRequestError struct{ err error }
+
+func (e *badRequestError) Error() string { return "bad request: " + e.err.Error() }
+func (e *badRequestError) Unwrap() error { return e.err }
+
 func decode(r *http.Request, v any) error {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		return err
 	}
 	if err := json.Unmarshal(body, v); err != nil {
-		return fmt.Errorf("bad request: %w", err)
+		return &badRequestError{err}
 	}
 	return nil
 }

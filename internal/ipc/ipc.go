@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -92,6 +93,8 @@ func DefaultSocket() (string, error) {
 type Server struct {
 	Socket string
 	Ctl    Controller
+	// Log receives server errors; nil means slog.Default().
+	Log *slog.Logger
 }
 
 // ErrAlreadyRunning means another daemon answers on the socket.
@@ -129,20 +132,23 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 // Serve answers requests on ln until ctx is done or the listener fails.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	if s.Log == nil {
+		s.Log = slog.Default()
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.Ctl.Status())
 	})
 	mux.HandleFunc("POST /v1/mounts/{name}/connect", func(w http.ResponseWriter, r *http.Request) {
-		s.handleErr(w, s.Ctl.Connect(r.PathValue("name")))
+		s.handleErr(w, r, s.Ctl.Connect(r.PathValue("name")))
 	})
 	mux.HandleFunc("POST /v1/mounts/{name}/disconnect", func(w http.ResponseWriter, r *http.Request) {
-		s.handleErr(w, s.Ctl.Disconnect(r.PathValue("name"), r.URL.Query().Get("force") == "1"))
+		s.handleErr(w, r, s.Ctl.Disconnect(r.PathValue("name"), r.URL.Query().Get("force") == "1"))
 	})
 	mux.HandleFunc("POST /v1/mounts/{name}/sync", func(w http.ResponseWriter, r *http.Request) {
 		res, err := s.Ctl.Sync(r.Context(), r.PathValue("name"))
 		if err != nil {
-			s.handleErr(w, err)
+			s.handleErr(w, r, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, res)
@@ -154,9 +160,13 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		writeJSON(w, http.StatusOK, s.Ctl.Reload())
 	})
 	mux.HandleFunc("POST /v1/shutdown", func(w http.ResponseWriter, r *http.Request) {
-		s.handleErr(w, s.Ctl.Shutdown(r.URL.Query().Get("force") == "1"))
+		s.handleErr(w, r, s.Ctl.Shutdown(r.URL.Query().Get("force") == "1"))
 	})
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ErrorLog:          slog.NewLogLogger(s.Log.Handler(), slog.LevelError),
+	}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {
@@ -175,7 +185,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	}
 }
 
-func (s *Server) handleErr(w http.ResponseWriter, err error) {
+func (s *Server) handleErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -184,6 +194,7 @@ func (s *Server) handleErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrPendingUploads):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 	default:
+		s.Log.Error("control request failed", "method", r.Method, "path", r.URL.Path, "err", err.Error())
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 }

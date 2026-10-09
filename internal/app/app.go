@@ -120,7 +120,7 @@ func New(opts Options) (*App, error) {
 	}
 	web, err := webui.New(webui.Deps{
 		Settings: a.settings, Ctl: a, Registry: a.reg, Backends: Backends,
-		LogPath: lf.Path, Version: opts.Version, PickDirectory: opts.PickDirectory,
+		LogPath: lf.Path, Version: opts.Version, PickDirectory: opts.PickDirectory, Log: log,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("settings server: %w", err)
@@ -183,7 +183,7 @@ func (a *App) Run(ctx context.Context) error {
 
 	// The socket first: a second daemon must stop before it cleans up or
 	// mounts anything the first one owns.
-	ctl := &ipc.Server{Socket: a.socket, Ctl: a}
+	ctl := &ipc.Server{Socket: a.socket, Ctl: a, Log: a.log}
 	ctlLn, err := ctl.Listen()
 	if err != nil {
 		a.log.Error("control socket", "err", err.Error())
