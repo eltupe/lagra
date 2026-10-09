@@ -183,6 +183,9 @@ func TestAPIFlow(t *testing.T) {
 	if resp.StatusCode != 200 || !strings.Contains(string(body), "<title>Lagra</title>") {
 		t.Errorf("index page: %d %.80s", resp.StatusCode, body)
 	}
+	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") || !strings.Contains(csp, "default-src 'self'") {
+		t.Errorf("index page CSP = %q", csp)
+	}
 }
 
 // A body the server cannot read is the page's fault (400, not logged); any

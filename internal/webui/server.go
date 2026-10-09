@@ -155,9 +155,13 @@ func (s *Server) handler() http.Handler {
 	mux.Handle("GET /app.js", s.static(files))
 	mux.Handle("GET /style.css", s.static(files))
 
+	// Changes must come from this server's own page: cookies are per host,
+	// not per port, so a page on any other localhost port would carry ours.
+	// Requests that say nothing about their origin (the CLI, tests) pass.
+	cop := http.NewCrossOriginProtection()
 	api := func(pattern string, fn func(r *http.Request) (any, error)) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			if !s.authed(r) || (r.Method != http.MethodGet && !sameOrigin(r)) {
+			if !s.authed(r) || cop.Check(r) != nil {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 				return
 			}
@@ -320,7 +324,22 @@ func (s *Server) handler() http.Handler {
 		}
 		return map[string]any{"path": s.deps.LogPath, "lines": tailLines(s.deps.LogPath, n)}, nil
 	})
-	return s.hostCheck(mux)
+	return s.hostCheck(commonHeaders(mux))
+}
+
+// commonHeaders sets the security headers "Let's Go" recommends. The page
+// loads nothing but its own files (and a data: image in the stylesheet);
+// frame-ancestors keeps another local page from framing it, which the
+// cookie alone would not prevent.
+func commonHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) static(files http.Handler) http.Handler {
@@ -355,20 +374,6 @@ func (s *Server) authed(r *http.Request) bool {
 
 func (s *Server) isToken(t string) bool {
 	return subtle.ConstantTimeCompare([]byte(t), []byte(s.token)) == 1
-}
-
-// sameOrigin rejects changes that another local page made a browser send:
-// cookies are per host, not per port, so a page on any other localhost port
-// would carry ours. A request that says where it comes from must come from
-// this server; one that says nothing (the CLI, tests) passes.
-func sameOrigin(r *http.Request) bool {
-	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" {
-		return false
-	}
-	if o := r.Header.Get("Origin"); o != "" && o != "http://"+r.Host {
-		return false
-	}
-	return true
 }
 
 // badRequestError is a request body the server cannot use: 400, not

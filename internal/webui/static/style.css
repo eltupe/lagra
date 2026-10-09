@@ -141,6 +141,8 @@ input[type=text], input[type=password], input[type=number], input[type=search], 
   background-color: var(--field); color: var(--fg); min-height: 30px; transition: border-color .12s, box-shadow .12s; }
 textarea { resize: vertical; line-height: 1.5; padding: 6px 9px; display: block; }
 .mono, textarea.mono { font: 12px/1.5 var(--mono); }
+/* the clipboard fallback's textarea: in the page, out of sight */
+.offscreen { position: fixed; opacity: 0; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 input::placeholder, textarea::placeholder { color: var(--faint); }
 input[type=search]::-webkit-search-decoration { -webkit-appearance: none; }
