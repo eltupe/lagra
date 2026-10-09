@@ -295,7 +295,7 @@ Bug reports, test results with other storage kinds and pull requests are welcome
 
 ```sh
 make test                   # go test -race ./...
-make vet
+make audit                  # vet, staticcheck, govulncheck, tests: run before a pull request
 make build                  # bin/lagra
 go run ./hack/uipreview     # the settings page against a fake daemon; open the printed URL
 ```

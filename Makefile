@@ -32,7 +32,7 @@ LINKDIR    ?= $(HOME)/.local/bin
 # Folders, Network Volumes) survive rebuilds. Falls back to ad-hoc ("-").
 SIGN_ID    ?= $(shell security find-identity -v -p codesigning 2>/dev/null | grep -q '"lagra Developer"' && echo "lagra Developer" || echo "-")
 
-.PHONY: all build test vet app sign cert install uninstall dist dist-arch clean run
+.PHONY: all build test vet tidy audit app sign cert install uninstall dist dist-arch clean run
 # App icon for Finder and Launchpad: the menu bar anchor in white, no shadow,
 # on a vertical gradient #2f78ad → #1a4f7f. macOS icon grid: 1024 units, the
 # body 824 wide and centred. The body must be a rounded square with corner
@@ -51,6 +51,22 @@ vet:
 
 test:
 	go test -race ./...
+
+# Tidy go.mod, then format and modernize the code.
+tidy:
+	go mod tidy
+	go fix ./...
+	go fmt ./...
+
+# Checks before a commit or release. staticcheck and govulncheck are tool
+# dependencies in go.mod, so everyone runs the same versions.
+audit:
+	go mod tidy -diff
+	go mod verify
+	go vet ./...
+	go tool staticcheck ./...
+	go tool govulncheck ./...
+	go test -race -vet=off ./...
 
 # .app bundle: LSUIElement hides the Dock icon; the same binary is the CLI.
 app: build $(ICON)

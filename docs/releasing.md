@@ -34,7 +34,7 @@ Every bundle carries `LICENSE` and `THIRD_PARTY_NOTICES.txt` in `Contents/Resour
 
    ```sh
    git tag -a v0.1.0 -m "Lagra 0.1.0"
-   make test
+   make audit
    make dist DEVELOPER_ID="Developer ID Application: <name> (<team id>)" NOTARY_PROFILE=lagra
    ```
 

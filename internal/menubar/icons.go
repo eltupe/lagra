@@ -80,21 +80,6 @@ func distSeg(p, a, b pt) float64 {
 
 func distCircle(p, c pt, r float64) float64 { return math.Abs(math.Hypot(p.x-c.x, p.y-c.y) - r) }
 
-// distArc measures the distance to the part of a circle between angles a0
-// and a1 (radians, clockwise from +x with y pointing down).
-func distArc(p, c pt, r, a0, a1 float64) float64 {
-	ang := math.Atan2(p.y-c.y, p.x-c.x)
-	if ang < 0 {
-		ang += 2 * math.Pi
-	}
-	if ang >= a0 && ang <= a1 {
-		return distCircle(p, c, r)
-	}
-	e0 := pt{c.x + r*math.Cos(a0), c.y + r*math.Sin(a0)}
-	e1 := pt{c.x + r*math.Cos(a1), c.y + r*math.Sin(a1)}
-	return math.Min(math.Hypot(p.x-e0.x, p.y-e0.y), math.Hypot(p.x-e1.x, p.y-e1.y))
-}
-
 // distTri is a signed-ish distance to a filled triangle (0 inside).
 func distTri(p, a, b, c pt) float64 {
 	inside := func(p, a, b, c pt) bool {
