@@ -152,7 +152,7 @@ Set `launch_at_login = true` in `[general]` to start Lagra when you log in.
 
 ## Configuration
 
-The config file is the single source of truth, whether you edit it by hand or in the settings window. Lagra looks for it at `--config <path>`, `$LAGRA_CONFIG`, `$XDG_CONFIG_HOME/lagra/config.toml` and `~/.config/lagra/config.toml`; symlinks are followed and written through. `~` and `${VAR}` work in paths, so one file can serve several Macs.
+The config file is the single source of truth, whether you edit it by hand or in the settings window. Both at once is safe: when the file changes while the window is open, the window does not save over the change and offers to load the file as it is now. Lagra looks for it at `--config <path>`, `$LAGRA_CONFIG`, `$XDG_CONFIG_HOME/lagra/config.toml` and `~/.config/lagra/config.toml`; symlinks are followed and written through. `~` and `${VAR}` work in paths, so one file can serve several Macs.
 
 `lagra config example` prints every setting with its default and an explanation (also in [`internal/config/example.toml`](internal/config/example.toml)). `lagra options <type>` lists what a storage kind accepts, straight from rclone's metadata.
 
