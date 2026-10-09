@@ -265,6 +265,37 @@ func TestSaveMount(t *testing.T) {
 	}
 }
 
+// A form filled from an older version of the file must not write over a
+// change made in an editor since.
+func TestEditRefusesAStaleVersion(t *testing.T) {
+	s, _, target := newService(t, base)
+	v, err := s.Load(context.Background())
+	if err != nil || v.FileVersion == "" {
+		t.Fatalf("load: %v, version %q", err, v.FileVersion)
+	}
+	edited := strings.Replace(base, `path = "photos"`, `path = "photos/2026"`, 1)
+	if err := os.WriteFile(target, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ran := false
+	if _, err := s.Edit(v.FileVersion, func() error { ran = true; return nil }); !errors.Is(err, ErrConflict) || ran {
+		t.Fatalf("stale version: err %v, ran %v", err, ran)
+	}
+	v, _ = s.Load(context.Background())
+	got, err := s.Edit(v.FileVersion, func() error {
+		return s.SaveMount(context.Background(), "photos", MountInput{Name: "photos", Account: "aws", Type: "s3", Path: "photos/2026", Enabled: new(false)})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if now, _ := s.Load(context.Background()); got != now.FileVersion || got == v.FileVersion {
+		t.Errorf("Edit returned %q, file is at %q, was %q", got, now.FileVersion, v.FileVersion)
+	}
+	if _, err := s.Edit("", func() error { return nil }); err != nil {
+		t.Errorf("no version, no check: %v", err)
+	}
+}
+
 // Add storage with "New account…": both blocks in one edit, the account
 // before the mounts, its secret in the keychain.
 func TestSaveMountWithNewAccount(t *testing.T) {

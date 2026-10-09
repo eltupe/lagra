@@ -175,6 +175,8 @@ func (s *Server) handler() http.Handler {
 					writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": ve.Error(), "issues": ve.Issues})
 				case errors.As(err, &br):
 					writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				case errors.Is(err, settings.ErrConflict):
+					writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": err.Error()})
 				case errors.Is(err, ipc.ErrNoMount):
 					writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 				default:
@@ -218,56 +220,61 @@ func (s *Server) handler() http.Handler {
 	api("GET /api/status", func(r *http.Request) (any, error) {
 		return s.deps.Ctl.Status(), nil
 	})
+	// Changes to the file go through the settings service one at a time.
+	// A save names the file version its form was filled from in If-Match
+	// and fails with 412 when the file changed since; removing something
+	// by name needs no such check. Every change answers with the new
+	// version, so the page can make the next one.
+	edit := func(base string, fn func() error) (any, error) {
+		v, err := s.deps.Settings.Edit(base, fn)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true, "file_version": v}, nil
+	}
+	ifMatch := func(r *http.Request) string { return strings.Trim(r.Header.Get("If-Match"), `"`) }
 	api("POST /api/config/create", func(r *http.Request) (any, error) {
-		return nil, s.deps.Settings.Create()
+		return edit("", s.deps.Settings.Create)
 	})
-	api("POST /api/accounts", func(r *http.Request) (any, error) {
+	saveAccount := func(r *http.Request, oldName string) (any, error) {
 		var in settings.AccountInput
 		if err := decode(r, &in); err != nil {
 			return nil, err
 		}
-		return nil, s.deps.Settings.SaveAccount(r.Context(), "", in)
-	})
-	api("PUT /api/accounts/{name}", func(r *http.Request) (any, error) {
-		var in settings.AccountInput
-		if err := decode(r, &in); err != nil {
-			return nil, err
-		}
-		return nil, s.deps.Settings.SaveAccount(r.Context(), r.PathValue("name"), in)
-	})
+		return edit(ifMatch(r), func() error { return s.deps.Settings.SaveAccount(r.Context(), oldName, in) })
+	}
+	api("POST /api/accounts", func(r *http.Request) (any, error) { return saveAccount(r, "") })
+	api("PUT /api/accounts/{name}", func(r *http.Request) (any, error) { return saveAccount(r, r.PathValue("name")) })
 	api("DELETE /api/accounts/{name}", func(r *http.Request) (any, error) {
-		return nil, s.deps.Settings.DeleteAccount(r.Context(), r.PathValue("name"), r.URL.Query().Get("secrets") == "1")
+		return edit("", func() error {
+			return s.deps.Settings.DeleteAccount(r.Context(), r.PathValue("name"), r.URL.Query().Get("secrets") == "1")
+		})
 	})
-	api("POST /api/mounts", func(r *http.Request) (any, error) {
+	saveMount := func(r *http.Request, oldName string) (any, error) {
 		var in settings.MountInput
 		if err := decode(r, &in); err != nil {
 			return nil, err
 		}
-		return nil, s.deps.Settings.SaveMount(r.Context(), "", in)
-	})
-	api("PUT /api/mounts/{name}", func(r *http.Request) (any, error) {
-		var in settings.MountInput
-		if err := decode(r, &in); err != nil {
-			return nil, err
-		}
-		return nil, s.deps.Settings.SaveMount(r.Context(), r.PathValue("name"), in)
-	})
+		return edit(ifMatch(r), func() error { return s.deps.Settings.SaveMount(r.Context(), oldName, in) })
+	}
+	api("POST /api/mounts", func(r *http.Request) (any, error) { return saveMount(r, "") })
+	api("PUT /api/mounts/{name}", func(r *http.Request) (any, error) { return saveMount(r, r.PathValue("name")) })
 	api("DELETE /api/mounts/{name}", func(r *http.Request) (any, error) {
-		return nil, s.deps.Settings.DeleteMount(r.Context(), r.PathValue("name"))
+		return edit("", func() error { return s.deps.Settings.DeleteMount(r.Context(), r.PathValue("name")) })
 	})
 	api("PUT /api/general", func(r *http.Request) (any, error) {
 		var in settings.GeneralInput
 		if err := decode(r, &in); err != nil {
 			return nil, err
 		}
-		return nil, s.deps.Settings.SaveGeneral(in)
+		return edit(ifMatch(r), func() error { return s.deps.Settings.SaveGeneral(in) })
 	})
 	api("PUT /api/defaults", func(r *http.Request) (any, error) {
 		var in settings.DefaultsInput
 		if err := decode(r, &in); err != nil {
 			return nil, err
 		}
-		return nil, s.deps.Settings.SaveDefaults(in)
+		return edit(ifMatch(r), func() error { return s.deps.Settings.SaveDefaults(in) })
 	})
 	api("POST /api/mounts/{name}/connect", func(r *http.Request) (any, error) {
 		return nil, s.deps.Ctl.Connect(r.PathValue("name"))

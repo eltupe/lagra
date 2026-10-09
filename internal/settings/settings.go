@@ -7,6 +7,8 @@ package settings
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -23,7 +25,8 @@ import (
 	"github.com/eltupe/lagra/internal/tomledit"
 )
 
-// Service edits one config file.
+// Service edits one config file. Its methods do not serialize themselves;
+// callers that may run at the same time go through Edit.
 type Service struct {
 	Path     string // configured path, may be a symlink
 	Registry config.Registry
@@ -34,7 +37,13 @@ type Service struct {
 	// a secret change leaves the file untouched and the hot reload would not
 	// notice.
 	OnSecretsChanged func(account string)
+
+	mu sync.Mutex // held by Edit
 }
+
+// ErrConflict is returned by Edit when the file changed after the version
+// the edit was made against.
+var ErrConflict = errors.New("the config file changed after this page loaded it; nothing was saved")
 
 // View is what the UI needs to render the whole configuration.
 type View struct {
@@ -47,6 +56,9 @@ type View struct {
 	Mounts   []MountView   `json:"mounts"`
 	Issues   config.Issues `json:"issues"`
 	Valid    bool          `json:"valid"`
+	// FileVersion identifies the content shown; an edit made from this view
+	// passes it to Edit.
+	FileVersion string `json:"file_version"`
 }
 
 // GeneralView mirrors [general] under its TOML key names, durations as text.
@@ -194,7 +206,7 @@ func (s *Service) Load(ctx context.Context) (*View, error) {
 	if err != nil {
 		return nil, err
 	}
-	v.Exists = true
+	v.Exists, v.FileVersion = true, fileVersion(raw)
 	doc, err := config.Parse(s.Path, raw)
 	if err != nil {
 		if is, ok := errors.AsType[*config.Issue](err); ok {
@@ -283,6 +295,39 @@ func (s *Service) storedSecrets(ctx context.Context, accounts []config.Account) 
 	}
 	wg.Wait()
 	return out
+}
+
+// Edit runs fn, one change to the file, under the service's lock and
+// returns the version of the file it leaves. base is the version the
+// change was made against, typically the one the settings page loaded: if
+// the file changed since (in an editor, say), fn does not run and Edit
+// returns ErrConflict, so that a form showing old values cannot write them
+// over newer ones. An empty base skips that check.
+func (s *Service) Edit(base string, fn func() error) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if base != "" && base != s.currentVersion() {
+		return "", ErrConflict
+	}
+	if err := fn(); err != nil {
+		return "", err
+	}
+	return s.currentVersion(), nil
+}
+
+// fileVersion identifies a content of the file.
+func fileVersion(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:8])
+}
+
+// currentVersion is the version of the file now, "" when there is none.
+func (s *Service) currentVersion() string {
+	raw, err := os.ReadFile(s.Path)
+	if err != nil {
+		return ""
+	}
+	return fileVersion(raw)
 }
 
 // Create writes a minimal config file when none exists.

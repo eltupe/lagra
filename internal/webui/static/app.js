@@ -65,10 +65,16 @@
   // ---------------------------------------------------------------- data
   const state = { meta: null, view: null, status: null, current: { kind: 'general' }, optionCache: {}, dirty: false };
 
+  // Changes name the version of the file the page shows (If-Match); the
+  // server refuses a save with 412 when the file changed since, and every
+  // change answers with the new version.
   async function api(method, path, body) {
-    const res = await fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+    const headers = body ? { 'Content-Type': 'application/json' } : {};
+    if (method !== 'GET' && state.view?.file_version) headers['If-Match'] = `"${state.view.file_version}"`;
+    const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) { const e = new Error(data.error || res.statusText); e.issues = data.issues || []; throw e; }
+    if (!res.ok) { const e = new Error(data.error || res.statusText); e.issues = data.issues || []; e.status = res.status; throw e; }
+    if (method !== 'GET' && data.file_version && state.view) state.view.file_version = data.file_version;
     return data;
   }
   async function refresh() {
@@ -389,6 +395,13 @@
     for (const e of page.querySelectorAll('.field-error')) e.remove();
   }
   function showIssues(page, host, e) {
+    if (e.status === 412) {
+      host.replaceChildren(callout('bad', 'The config file changed outside this window — nothing was saved',
+        'Load the file as it is now, then make your change again.',
+        h('div', { class: 'callout-actions' }, button('Load the current file', async () => { setDirty(false); await refresh(); await show(state.current, { force: true }); }, { glyph: 'refresh' }))));
+      host.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      return;
+    }
     const issues = e.issues?.length ? e.issues : [{ msg: e.message }];
     host.replaceChildren(issuesBox(issues));
     markIssues(page, issues);

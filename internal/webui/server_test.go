@@ -223,6 +223,49 @@ func TestErrorResponses(t *testing.T) {
 	}
 }
 
+// A save names the file version its form came from; after an edit in an
+// editor it is refused with 412 and the file keeps the editor's change.
+func TestSaveAgainstStaleVersion(t *testing.T) {
+	srv, cfg, _ := startServer(t)
+	_, body := req(t, srv, "GET", "/api/view", srv.token, nil)
+	var view settings.View
+	if err := json.Unmarshal(body, &view); err != nil || view.FileVersion == "" {
+		t.Fatalf("view: %v, version %q", err, view.FileVersion)
+	}
+	save := func(version string) (int, []byte) {
+		b, _ := json.Marshal(settings.MountInput{Name: "archiv", Account: "aws", Type: "s3", Path: "b/form"})
+		r, _ := http.NewRequest("PUT", "http://"+srv.addr+"/api/mounts/archiv", bytes.NewReader(b))
+		r.Header.Set("X-Lagra-Token", srv.token)
+		r.Header.Set("If-Match", `"`+version+`"`)
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		out, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, out
+	}
+	raw, _ := os.ReadFile(cfg)
+	edited := strings.Replace(string(raw), `path = "b"`, `path = "b/editor"`, 1)
+	_ = os.WriteFile(cfg, []byte(edited), 0o644)
+	if code, _ := save(view.FileVersion); code != http.StatusPreconditionFailed {
+		t.Errorf("stale save: %d, want 412", code)
+	}
+	if now, _ := os.ReadFile(cfg); string(now) != edited {
+		t.Errorf("stale save changed the file:\n%s", now)
+	}
+	_, body = req(t, srv, "GET", "/api/view", srv.token, nil)
+	_ = json.Unmarshal(body, &view)
+	code, out := save(view.FileVersion)
+	var res struct {
+		FileVersion string `json:"file_version"`
+	}
+	_ = json.Unmarshal(out, &res)
+	if code != http.StatusOK || res.FileVersion == "" || res.FileVersion == view.FileVersion {
+		t.Errorf("fresh save: %d %s", code, out)
+	}
+}
+
 // Another page on localhost must not be able to change anything, even when
 // the browser sends our cookie along.
 func TestCrossOriginWritesRefused(t *testing.T) {
