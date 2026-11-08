@@ -92,8 +92,9 @@ func TestSymlinkRepointed(t *testing.T) {
 	_ = os.Symlink(v1, link)
 	n, stop := start(t, link)
 	defer stop()
-	// atomically swap the symlink (ln -sfn semantics)
-	tmp := link + ".tmp"
+	// atomically swap the symlink the way GNU ln -sfn does: a new link
+	// under a temp name renamed over the old one
+	tmp := filepath.Join(cfgDir, "CuAb12Xy")
 	_ = os.Symlink(v2, tmp)
 	if err := os.Rename(tmp, link); err != nil {
 		t.Fatal(err)

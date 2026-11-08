@@ -3,6 +3,11 @@
 // new, delete and recreate, git checkout. It watches directories, never the
 // file itself, re-resolves the symlink on every event, debounces, and falls
 // back to periodic content hashing in case events get lost.
+//
+// Any event in a watched directory leads to a check of the content hash,
+// whatever file it names. Which events arrive is up to the platform: with
+// kqueue, a symlink renamed over the config (what GNU ln -sf does, from a
+// temp name like "CuXXXXXX") shows up only as the temp file's creation.
 package reload
 
 import (
@@ -91,12 +96,9 @@ func (w *Watcher) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case ev, ok := <-fw.Events:
+		case _, ok := <-fw.Events:
 			if !ok {
 				return nil
-			}
-			if !w.relevant(ev.Name) {
-				continue
 			}
 			debounce.Reset(w.Debounce)
 		case <-debounce.C:
@@ -131,22 +133,4 @@ func (w *Watcher) dirs() []string {
 		}
 	}
 	return out
-}
-
-// relevant filters directory events down to the ones that can affect our
-// file: the file itself, the symlink, or the resolved target. Editors' temp
-// files (".config.toml.swp", "config.toml~", "4913") end with a rename to
-// the real name, which we do see, so ignoring them is safe.
-func (w *Watcher) relevant(name string) bool {
-	base := filepath.Base(name)
-	if base == filepath.Base(w.Path) {
-		return true
-	}
-	if real, err := filepath.EvalSymlinks(w.Path); err == nil && (name == real || base == filepath.Base(real)) {
-		return true
-	}
-	if target, err := os.Readlink(w.Path); err == nil && base == filepath.Base(target) {
-		return true
-	}
-	return false
 }
