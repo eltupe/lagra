@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"sort"
 	"strings"
@@ -23,15 +24,24 @@ import (
 
 // Item is one line of the menu as the model computes it.
 type Item struct {
-	Title    string
+	Title   string
+	Tooltip string
+	// Icon is a status dot before the title, coloured like the settings
+	// window's: "ok", "busy", "warn", "bad", "idle", or "" for none.
+	Icon     string
 	Disabled bool
-	Checked  bool
-	Children []Item
+	// Hidden entries stay in the menu, invisible, so that the menu keeps
+	// its structure while a storage changes state; see shape.
+	Hidden    bool
+	Separator bool
+	Children  []Item
 	// Action is "", "settings", "connect:<name>", "disconnect:<name>",
 	// "sync:<name>", "open:<path>", "reload", "openconfig", "openlogs",
-	// "reconnect" or "quit".
+	// "connectall" or "quit".
 	Action string
 }
+
+var separator = Item{Separator: true}
 
 // Model is a pure function of the daemon status.
 type Model struct {
@@ -40,101 +50,209 @@ type Model struct {
 	Items   []Item
 }
 
-// Build computes the menu for a status.
+// Build computes the menu for a status: what Lagra is doing, the storages
+// in a submenu, the app's own commands, Quit.
 func Build(st ipc.Status) Model {
 	m := Model{Icon: iconFor(st.Overall, st.ConfigOK)}
+	mounts := append([]engine.Snapshot(nil), st.Mounts...)
+	sort.Slice(mounts, func(i, j int) bool { return mounts[i].Name < mounts[j].Name })
+	summary, uploads := summarize(mounts)
+
+	var status []Item
 	switch {
 	case st.ConfigMissing:
 		m.Icon = icon("idle")
 		m.Tooltip = "Lagra: not set up yet"
-		m.Items = append(m.Items, Item{Title: "Set up Lagra…", Action: "settings"})
+		status = append(status, Item{Title: "Set Up Lagra…", Action: "settings"})
 	case !st.ConfigOK:
 		m.Tooltip = "Lagra: config error"
-		m.Items = append(m.Items, Item{Title: "Config error: " + truncate(firstLine(st.ConfigError), 60), Disabled: true})
+		status = append(status, Item{Title: "Config error: " + truncate(firstLine(st.ConfigError), 60), Tooltip: st.ConfigError, Disabled: true})
 	default:
-		m.Tooltip = "Lagra: " + string(st.Overall)
+		m.Tooltip = "Lagra: " + summary
 	}
-	mounts := append([]engine.Snapshot(nil), st.Mounts...)
-	sort.Slice(mounts, func(i, j int) bool { return mounts[i].Name < mounts[j].Name })
-	if len(mounts) == 0 && st.ConfigOK {
-		m.Items = append(m.Items, Item{Title: "No mounts configured", Disabled: true})
+	if st.ConfigOK || len(mounts) > 0 {
+		status = append(status,
+			Item{Title: summary, Disabled: true},
+			Item{Title: fmt.Sprintf("Uploading %s…", plural(uploads, "file")), Disabled: true, Hidden: uploads == 0},
+		)
 	}
-	for _, s := range mounts {
-		m.Items = append(m.Items, mountItem(s))
+
+	var storages []Item
+	if len(mounts) > 0 {
+		list := make([]Item, 0, len(mounts))
+		connectable := false
+		for _, s := range mounts {
+			list = append(list, mountItem(s))
+			connectable = connectable || s.Enabled && !mounted(s) && s.State != engine.Connecting
+		}
+		storages = append(storages,
+			Item{Title: "Storages", Children: list},
+			Item{Title: "Connect All", Action: "connectall", Disabled: !connectable},
+		)
 	}
-	m.Items = append(m.Items,
-		Item{Title: "-"},
-		Item{Title: "Settings…", Action: "settings"},
-		Item{Title: "Reconnect all", Action: "reconnect"},
-		Item{Title: "Reload config", Action: "reload"},
-		Item{Title: "Open config in editor", Action: "openconfig"},
-		Item{Title: "Open logs", Action: "openlogs"},
-		Item{Title: "-"},
-		Item{Title: "Quit Lagra", Action: "quit"},
-	)
+
+	var commands []Item
+	if !st.ConfigMissing {
+		commands = append(commands,
+			Item{Title: "Settings…", Action: "settings"},
+			Item{Title: "Edit Config File", Action: "openconfig"},
+			Item{Title: "Reload Config", Action: "reload"},
+		)
+	}
+	commands = append(commands, Item{Title: "Show Logs in Finder", Action: "openlogs"})
+
+	m.Items = sections(status, storages, commands, []Item{{Title: "Quit Lagra", Action: "quit"}})
 	return m
 }
 
+// summarize says how many of the storages that are turned on are
+// connected, and counts the files waiting to upload.
+func summarize(mounts []engine.Snapshot) (string, int) {
+	on, connected, uploads := 0, 0, 0
+	for _, s := range mounts {
+		uploads += s.Uploads
+		if !s.Enabled {
+			continue
+		}
+		on++
+		if s.State == engine.Connected {
+			connected++
+		}
+	}
+	switch {
+	case len(mounts) == 0:
+		return "No storages yet", uploads
+	case on == 0:
+		return "All storages are off", uploads
+	}
+	return fmt.Sprintf("%d of %d connected", connected, on), uploads
+}
+
+// sections joins groups of items with separators, leaving out empty groups.
+func sections(groups ...[]Item) []Item {
+	var out []Item
+	for _, g := range groups {
+		if len(g) == 0 {
+			continue
+		}
+		if len(out) > 0 {
+			out = append(out, separator)
+		}
+		out = append(out, g...)
+	}
+	return out
+}
+
+// mountItem is a storage in the Storages submenu: its name with a status
+// dot, and a submenu that says what is going on above a separator and
+// offers what can be done below it. Every state has the same entries, the
+// ones that do not apply are hidden, so a state change never rebuilds the
+// menu under the pointer. A storage turned off in the config is greyed out.
 func mountItem(s engine.Snapshot) Item {
-	title := fmt.Sprintf("%s — %s", s.Name, label(s))
-	it := Item{Title: title, Disabled: !s.Enabled}
+	words := statusWords(s)
+	it := Item{Title: s.Name, Tooltip: words, Icon: dot(s)}
 	if !s.Enabled {
-		it.Title = s.Name + " — disabled"
+		it.Disabled = true
 		return it
 	}
-	switch s.State {
-	case engine.Connected, engine.Offline:
-		it.Children = append(it.Children,
-			Item{Title: "Open in Finder", Action: "open:" + s.MountPoint},
-			Item{Title: "Sync now", Action: "sync:" + s.Name},
-			Item{Title: "Disconnect", Action: "disconnect:" + s.Name},
-		)
-	case engine.Connecting:
-		it.Children = append(it.Children, Item{Title: "Disconnect", Action: "disconnect:" + s.Name})
-	default:
-		it.Children = append(it.Children, Item{Title: "Connect", Action: "connect:" + s.Name})
-	}
 	if s.Uploads > 0 {
-		t := fmt.Sprintf("%d upload(s) pending", s.Uploads)
-		if s.Stuck {
-			t += " (stuck)"
-		}
-		it.Children = append(it.Children, Item{Title: t, Disabled: true})
+		it.Title += " — uploading " + plural(s.Uploads, "file")
 	}
-	if s.Pending != nil {
-		it.Children = append(it.Children, Item{Title: fmt.Sprintf("Change pending: %s (%s)", s.Pending.Action, s.Pending.Reason), Disabled: true})
+	uploads := fmt.Sprintf("Uploading %s…", plural(s.Uploads, "file"))
+	if s.Stuck {
+		uploads = fmt.Sprintf("%s seem stuck", plural(s.Uploads, "upload"))
 	}
-	if s.LastError != "" && (s.State == engine.Broken || s.State == engine.Failed || s.State == engine.Offline) {
-		it.Children = append(it.Children, Item{Title: truncate(firstLine(s.LastError), 70), Disabled: true})
+	showErr := s.LastError != "" && (s.State == engine.Broken || s.State == engine.Failed || s.State == engine.Offline)
+	connect := "Connect"
+	if s.State == engine.Broken {
+		connect = "Reconnect Now"
+	}
+	on := mounted(s)
+	it.Children = []Item{
+		{Title: words, Disabled: true},
+		{Title: uploads, Disabled: true, Hidden: s.Uploads == 0},
+		{Title: pendingWords(s.Pending), Disabled: true, Hidden: s.Pending == nil},
+		{Title: truncate(firstLine(s.LastError), 70), Tooltip: s.LastError, Disabled: true, Hidden: !showErr},
+		separator,
+		{Title: "Open in Finder", Action: "open:" + s.MountPoint, Hidden: !on},
+		{Title: "Sync Now", Action: "sync:" + s.Name, Hidden: !on},
+		{Title: connect, Action: "connect:" + s.Name, Hidden: on || s.State == engine.Connecting},
+		{Title: "Disconnect", Action: "disconnect:" + s.Name, Hidden: !on && s.State != engine.Connecting},
 	}
 	return it
 }
 
-func label(s engine.Snapshot) string {
+// mounted reports whether the volume is in Finder.
+func mounted(s engine.Snapshot) bool {
+	return s.State == engine.Connected || s.State == engine.Offline
+}
+
+// statusWords names a storage's state in the words of the settings window.
+func statusWords(s engine.Snapshot) string {
+	if !s.Enabled {
+		return "Off"
+	}
 	switch s.State {
 	case engine.Connected:
-		if s.Uploads > 0 {
-			return fmt.Sprintf("connected, %d uploading", s.Uploads)
-		}
-		return "connected"
+		return "Connected"
 	case engine.Offline:
-		return "offline (backend unreachable)"
+		return "Storage unreachable"
 	case engine.Connecting:
-		return "connecting…"
+		return "Connecting…"
 	case engine.Broken:
-		if !s.NextRetry.IsZero() {
-			return fmt.Sprintf("broken, retry in %s", time.Until(s.NextRetry).Round(time.Second))
+		if d := time.Until(s.NextRetry).Round(time.Second); !s.NextRetry.IsZero() && d > 0 {
+			return "Reconnecting in " + d.String()
 		}
-		return "broken"
+		return "Reconnecting"
 	case engine.Failed:
-		return "failed"
+		return "Not connected"
 	case engine.Disconnected:
 		if s.Manual {
-			return "disconnected by you"
+			return "Disconnected by you"
 		}
-		return "disconnected"
+		return "Disconnected"
 	}
 	return string(s.State)
+}
+
+// dot is a storage's status colour, the same as in the settings window.
+func dot(s engine.Snapshot) string {
+	if !s.Enabled {
+		return "idle"
+	}
+	switch s.State {
+	case engine.Connected:
+		return "ok"
+	case engine.Connecting:
+		return "busy"
+	case engine.Offline, engine.Broken:
+		return "warn"
+	case engine.Failed:
+		return "bad"
+	}
+	return "idle"
+}
+
+// pendingWords says what a held-back change waits for.
+func pendingWords(p *engine.PendingChange) string {
+	if p == nil {
+		return ""
+	}
+	what := map[string]string{"disconnect": "Disconnects", "restart": "Reconnects with your changes", "remove": "Goes away"}[p.Action]
+	if what == "" {
+		what = "Continues"
+	}
+	if p.Reason == "in use" {
+		return what + " once no app uses the volume"
+	}
+	return what + " once all uploads are done"
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func firstLine(s string) string {
@@ -152,10 +270,23 @@ func truncate(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
+// Daemon is what the menu bar shows and drives: *app.App, or a fake in
+// hack/menupreview.
+type Daemon interface {
+	ipc.Controller
+	Run(ctx context.Context) error
+	Log() *slog.Logger
+	OnChange(fn func())
+	SettingsURL() string
+	LogDir() string
+}
+
+var _ Daemon = (*app.App)(nil)
+
 // Run starts the menu bar and blocks until the app stops; it returns the
 // app's error, e.g. when another daemon already runs. It must be called
 // from the main goroutine (Cocoa requirement).
-func Run(ctx context.Context, a *app.App) error {
+func Run(ctx context.Context, a Daemon) error {
 	ui := &ui{app: a}
 	var runErr error
 	appDone := make(chan struct{})
@@ -173,13 +304,20 @@ func Run(ctx context.Context, a *app.App) error {
 }
 
 type ui struct {
-	app *app.App
+	app Daemon
 
 	mu      sync.Mutex
-	items   []*systray.MenuItem // top-level items, reused
-	subs    [][]*systray.MenuItem
 	last    string   // what the menu shows now, to skip identical renders
-	actions sync.Map // "i/j" -> action of that item
+	shape   string   // the structure on screen, see shape
+	nodes   []*node  // the entries on screen, one per Item
+	actions sync.Map // *systray.MenuItem -> its action
+}
+
+// node is one entry on screen; separators have none.
+type node struct {
+	mi       *systray.MenuItem
+	shown    Item // what mi shows now
+	children []*node
 }
 
 func (u *ui) onReady() {
@@ -197,8 +335,10 @@ func (u *ui) onReady() {
 	u.app.Log().Info("menu bar: initial menu built")
 }
 
-// render rebuilds the menu. systray cannot delete items, so items are created
-// on demand and hidden when unused.
+// render brings the menu up to date. Entries change in place, so an open
+// menu stays open. systray can only append entries and cannot hide
+// separators, so when the structure changes (a storage added or removed,
+// the config broken or fixed) the menu is built anew from the top.
 func (u *ui) render() {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -210,67 +350,105 @@ func (u *ui) render() {
 		return
 	}
 	u.last = shown
-	u.app.Log().Debug("menu bar: render", "items", len(m.Items))
 	systray.SetTemplateIcon(m.Icon, m.Icon)
 	systray.SetTooltip(m.Tooltip)
-	for i, it := range m.Items {
-		u.place(i, it)
+	if s := shape(m.Items); s != u.shape {
+		u.app.Log().Debug("menu bar: build", "shape", s)
+		systray.ResetMenu() // closes the old entries' ClickedCh
+		u.actions.Clear()
+		u.nodes = u.add(nil, m.Items)
+		u.shape = s
 	}
-	for i := len(m.Items); i < len(u.items); i++ {
-		u.items[i].Hide()
-	}
+	u.update(u.nodes, m.Items)
 }
 
-func (u *ui) place(i int, it Item) {
-	for len(u.items) <= i {
-		mi := systray.AddMenuItem("", "")
-		u.items = append(u.items, mi)
-		u.subs = append(u.subs, nil)
-		u.watch(mi, i, -1)
-	}
-	mi := u.items[i]
-	if it.Title == "-" {
-		mi.SetTitle("—")
-		mi.Disable()
-		mi.Show()
-		return
-	}
-	mi.SetTitle(it.Title)
-	mi.SetTooltip(it.Title)
-	if it.Disabled {
-		mi.Disable()
-	} else {
-		mi.Enable()
-	}
-	mi.Show()
-	u.actions.Store(key(i, -1), it.Action)
-	for j, ch := range it.Children {
-		for len(u.subs[i]) <= j {
-			sub := mi.AddSubMenuItem("", "")
-			u.subs[i] = append(u.subs[i], sub)
-			u.watch(sub, i, len(u.subs[i])-1)
+// shape is the menu's structure: entries, dots and separators, nested, but
+// not what the entries say or whether they are hidden.
+func shape(items []Item) string {
+	var b strings.Builder
+	for _, it := range items {
+		switch {
+		case it.Separator:
+			b.WriteByte('-')
+		case it.Icon != "":
+			b.WriteByte('o') // systray can set an icon but not take it away
+		default:
+			b.WriteByte('i')
 		}
-		sub := u.subs[i][j]
-		sub.SetTitle(ch.Title)
-		if ch.Disabled {
-			sub.Disable()
+		if len(it.Children) > 0 {
+			b.WriteString("(" + shape(it.Children) + ")")
+		}
+	}
+	return b.String()
+}
+
+// add appends blank entries for items to parent's submenu, or to the menu
+// for nil; update fills them in. A separator needs its submenu to exist
+// already, so it must not come first.
+func (u *ui) add(parent *systray.MenuItem, items []Item) []*node {
+	nodes := make([]*node, len(items))
+	for i, it := range items {
+		if it.Separator {
+			if parent == nil {
+				systray.AddSeparator()
+			} else {
+				parent.AddSeparator()
+			}
+			continue
+		}
+		var mi *systray.MenuItem
+		if parent == nil {
+			mi = systray.AddMenuItem("", "")
 		} else {
-			sub.Enable()
+			mi = parent.AddSubMenuItem("", "")
 		}
-		sub.Show()
-		u.actions.Store(key(i, j), ch.Action)
+		u.watch(mi)
+		nodes[i] = &node{mi: mi, children: u.add(mi, it.Children)}
 	}
-	for j := len(it.Children); j < len(u.subs[i]); j++ {
-		u.subs[i][j].Hide()
+	return nodes
+}
+
+// update tells systray what changed since the last render, entry by entry.
+func (u *ui) update(nodes []*node, items []Item) {
+	for i, it := range items {
+		n := nodes[i]
+		if n == nil {
+			continue
+		}
+		was := n.shown
+		if it.Title != was.Title {
+			n.mi.SetTitle(it.Title)
+		}
+		if it.Tooltip != was.Tooltip {
+			n.mi.SetTooltip(it.Tooltip)
+		}
+		if it.Icon != was.Icon && it.Icon != "" {
+			n.mi.SetIcon(dotIcon(it.Icon))
+		}
+		if it.Disabled != was.Disabled {
+			if it.Disabled {
+				n.mi.Disable()
+			} else {
+				n.mi.Enable()
+			}
+		}
+		if it.Hidden != was.Hidden {
+			if it.Hidden {
+				n.mi.Hide()
+			} else {
+				n.mi.Show()
+			}
+		}
+		u.actions.Store(n.mi, it.Action)
+		n.shown = it
+		u.update(n.children, it.Children)
 	}
 }
 
-func key(i, j int) string { return fmt.Sprintf("%d/%d", i, j) }
-
-func (u *ui) watch(mi *systray.MenuItem, i, j int) {
+func (u *ui) watch(mi *systray.MenuItem) {
 	go func() {
 		for range mi.ClickedCh {
-			if v, ok := u.actions.Load(key(i, j)); ok {
+			if v, ok := u.actions.Load(mi); ok {
 				u.act(v.(string))
 			}
 		}
@@ -303,9 +481,9 @@ func (u *ui) act(action string) {
 		_ = exec.Command("/usr/bin/open", "-t", p).Start()
 	case "openlogs":
 		_ = exec.Command("/usr/bin/open", u.app.LogDir()).Start()
-	case "reconnect":
+	case "connectall":
 		for _, s := range u.app.Status().Mounts {
-			if s.Enabled {
+			if s.Enabled && !mounted(s) && s.State != engine.Connecting {
 				_ = u.app.Connect(s.Name)
 			}
 		}

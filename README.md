@@ -66,7 +66,7 @@ Without admin rights, install for your user only with `make install INSTALLDIR=$
 ### With the settings window
 
 1. Open **Lagra** from Applications. An anchor appears in the menu bar.
-2. Choose **Set up Lagra…** and add your first storage. Pick the kind (S3, SFTP, WebDAV, SMB, FTP or another), fill in the address and the login, then the bucket or folder.
+2. Choose **Set Up Lagra…** and add your first storage. Pick the kind (S3, SFTP, WebDAV, SMB, FTP or another), fill in the address and the login, then the bucket or folder.
 3. Save. Lagra writes the config file, stores the secrets in the keychain and connects. The volume appears in Finder under `~/Volumes`.
 
 To keep the config in your dotfiles, create the symlink before step 2. Lagra then writes into your repository:
@@ -234,7 +234,7 @@ Writes go through rclone's write cache (`vfs_cache_mode = full`). Saving returns
 |---|---|---|
 | You save a file, it reaches the storage | `vfs_write_back` after the file is closed (5 s), then the upload | `[mount.vfs] vfs_write_back` |
 | Someone else changes the storage, you see it in Finder | up to `dir_cache_time` (1 min) for listings; open files re-check on access | `[mount.vfs] dir_cache_time` |
-| On demand | menu → mount → **Sync now**, the button in the settings window, or `lagra sync [name]` | |
+| On demand | menu → Storages → the storage → **Sync Now**, the button in the settings window, or `lagra sync [name]` | |
 
 S3 cannot notify clients of changes, so polling the listing is the only way to see them. S3 also has no real folders: Lagra sets rclone's `directory_markers = true` for S3 unless you set it yourself, so an empty folder you create is kept as a zero-byte `folder/` object, and a bucket or folder that does not exist is reported instead of showing up as an empty volume.
 
@@ -280,7 +280,7 @@ Files: state and the control socket in `~/Library/Application Support/lagra/`, l
 
 - **The config has errors.** `lagra validate` names each one with its line. `lagra options <type>` lists what a storage kind accepts.
 - **A mount is offline or failed.** The settings window shows the reason in plain words, with the technical details below. `lagra status -v` shows the merged configuration without secrets; `lagra secret check` shows which secret sources fail.
-- **Logs.** Menu → *Open logs*, or `tail -f ~/Library/Logs/lagra/lagra.log`. `log_level = "debug"` also shows rclone's own messages.
+- **Logs.** Menu → *Show Logs in Finder*, or `tail -f ~/Library/Logs/lagra/lagra.log`. `log_level = "debug"` also shows rclone's own messages.
 - **"occupied by a mount lagra does not manage".** Something else, such as a hand-started `rclone nfsmount` or an SMB share, uses that mount point. Lagra never unmounts it; choose another `mount_point`.
 - **"the server rejected the login".** Wrong user name, domain or password, or an account that is locked, disabled or expired. Lagra stops at the first refusal instead of trying again, because a directory service such as Active Directory locks the account after a few failed logins. Saving new credentials reconnects.
 - **A mount stays broken.** The log has the last error and the retry schedule. A dead storage usually shows as offline instead; broken means the local server or the NFS mount itself failed.
@@ -298,6 +298,7 @@ make test                   # go test -race ./...
 make audit                  # vet, staticcheck, govulncheck, tests: run before a pull request
 make build                  # bin/lagra
 go run ./hack/uipreview     # the settings page against a fake daemon; open the printed URL
+go run ./hack/menupreview   # the menu bar menu against a fake daemon, next to a running Lagra
 ```
 
 - `cmd/lagra`: the command line, and the app when started from the bundle

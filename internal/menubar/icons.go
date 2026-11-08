@@ -168,3 +168,37 @@ func render(alpha float64, b badge) []byte {
 	_ = png.Encode(&buf, img)
 	return buf.Bytes()
 }
+
+// Status dots before each storage in the Storages submenu, in the settings
+// window's colours (style.css): 8 points wide, centred on the 16-point image
+// systray gives a menu entry, drawn at 2x. They are coloured, not template
+// images, so they look the same in light and dark menus.
+const dotSize = 32
+
+var dots = sync.OnceValue(func() map[string][]byte {
+	return map[string][]byte{
+		"ok":   renderDot(color.NRGBA{0x34, 0xc7, 0x59, 0xff}),
+		"busy": renderDot(color.NRGBA{0x00, 0x7a, 0xff, 0xff}),
+		"warn": renderDot(color.NRGBA{0xff, 0x95, 0x00, 0xff}),
+		"bad":  renderDot(color.NRGBA{0xff, 0x3b, 0x30, 0xff}),
+		"idle": renderDot(color.NRGBA{0x8e, 0x8e, 0x93, 0xff}),
+	}
+})
+
+func dotIcon(kind string) []byte { return dots()[kind] }
+
+func renderDot(c color.NRGBA) []byte {
+	img := image.NewNRGBA(image.Rect(0, 0, dotSize, dotSize))
+	const r = 8.0
+	for y := range dotSize {
+		for x := range dotSize {
+			d := math.Hypot(float64(x)+0.5-dotSize/2, float64(y)+0.5-dotSize/2)
+			if a := clamp(r-d+0.5, 0, 1); a > 0 {
+				img.SetNRGBA(x, y, color.NRGBA{c.R, c.G, c.B, uint8(float64(c.A)*a + 0.5)})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	_ = png.Encode(&buf, img)
+	return buf.Bytes()
+}

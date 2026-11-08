@@ -10,6 +10,40 @@ import (
 	"github.com/eltupe/lagra/internal/ipc"
 )
 
+// visible is what the menu shows: hidden entries left out, submenus too.
+func visible(items []Item) []Item {
+	var out []Item
+	for _, it := range items {
+		if !it.Hidden {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+func titles(items []Item) string {
+	var t []string
+	for _, it := range visible(items) {
+		if it.Separator {
+			t = append(t, "---")
+		} else {
+			t = append(t, it.Title)
+		}
+	}
+	return strings.Join(t, "|")
+}
+
+func find(t *testing.T, items []Item, title string) Item {
+	t.Helper()
+	for _, it := range items {
+		if it.Title == title {
+			return it
+		}
+	}
+	t.Fatalf("no %q in %s", title, titles(items))
+	return Item{}
+}
+
 func TestBuildModel(t *testing.T) {
 	st := ipc.Status{ConfigOK: true, Overall: engine.OverallPartial, Mounts: []engine.Snapshot{
 		{Name: "b", State: engine.Disconnected, Enabled: false},
@@ -18,41 +52,86 @@ func TestBuildModel(t *testing.T) {
 		{Name: "d", State: engine.Connected, Enabled: true, Pending: &engine.PendingChange{Action: "disconnect", Reason: "uploads pending"}},
 	}}
 	m := Build(st)
-	if m.Tooltip != "Lagra: partial" || len(m.Icon) == 0 {
+	if m.Tooltip != "Lagra: 2 of 3 connected" || len(m.Icon) == 0 {
 		t.Errorf("tooltip/icon: %q %d", m.Tooltip, len(m.Icon))
 	}
-	titles := []string{}
-	for _, it := range m.Items {
-		titles = append(titles, it.Title)
+	want := "2 of 3 connected|Uploading 2 files…|---|Storages|Connect All|---|Settings…|Edit Config File|Reload Config|Show Logs in Finder|---|Quit Lagra"
+	if got := titles(m.Items); got != want {
+		t.Errorf("menu =\n%s\nwant\n%s", got, want)
 	}
-	joined := strings.Join(titles, "|")
-	for _, want := range []string{"a — connected, 2 uploading", "b — disabled", "c — broken, retry in", "d — connected", "Settings…", "Reload config", "Quit Lagra"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("menu lacks %q in %s", want, joined)
+	if find(t, m.Items, "Connect All").Disabled {
+		t.Error("Connect All must be enabled while c is broken")
+	}
+
+	// storages sorted, each with a dot; b is off and greyed out
+	storages := find(t, m.Items, "Storages").Children
+	if got := titles(storages); got != "a — uploading 2 files|b|c|d" {
+		t.Errorf("storages = %s", got)
+	}
+	if b := storages[1]; !b.Disabled || b.Icon != "idle" || b.Tooltip != "Off" || b.Children != nil {
+		t.Errorf("b = %+v", b)
+	}
+	if storages[0].Icon != "ok" || storages[2].Icon != "warn" {
+		t.Errorf("dots = %q %q", storages[0].Icon, storages[2].Icon)
+	}
+
+	a := storages[0].Children
+	if got := titles(a); got != "Connected|Uploading 2 files…|---|Open in Finder|Sync Now|Disconnect" {
+		t.Errorf("a = %s", got)
+	}
+	if find(t, a, "Open in Finder").Action != "open:/Users/x/Volumes/a" || find(t, a, "Sync Now").Action != "sync:a" || find(t, a, "Disconnect").Action != "disconnect:a" {
+		t.Errorf("a actions = %+v", a)
+	}
+	c := visible(storages[2].Children)
+	if !strings.HasPrefix(c[0].Title, "Reconnecting in ") || c[1].Title != "mount probe: hung" || c[3].Title != "Reconnect Now" || c[3].Action != "connect:c" {
+		t.Errorf("c = %s", titles(c))
+	}
+	if d := titles(storages[3].Children); !strings.Contains(d, "|Disconnects once all uploads are done|---|") {
+		t.Errorf("d = %s", d)
+	}
+}
+
+// A storage keeps the same entries in every state, only showing or hiding
+// some, so the menu is never rebuilt while the user has it open, and no
+// state leaves a separator at an edge or two in a row.
+func TestEveryStateKeepsTheShape(t *testing.T) {
+	var shapes []string
+	for _, state := range []engine.State{engine.Connected, engine.Offline, engine.Connecting, engine.Broken, engine.Failed, engine.Disconnected} {
+		for _, s := range []engine.Snapshot{
+			{State: state},
+			{State: state, Uploads: 3, Stuck: true, LastError: "boom", Pending: &engine.PendingChange{Action: "restart", Reason: "in use"}},
+		} {
+			s.Name, s.Enabled = "x", true
+			m := Build(ipc.Status{ConfigOK: true, Mounts: []engine.Snapshot{s}})
+			shapes = append(shapes, shape(m.Items))
+			checkSeparators(t, string(state), m.Items)
 		}
 	}
-	// order: mounts sorted, disabled greyed but present
-	if !strings.HasPrefix(m.Items[0].Title, "a ") || !strings.HasPrefix(m.Items[1].Title, "b ") || !m.Items[1].Disabled {
-		t.Errorf("order/disabled wrong: %v", titles)
+	for _, sh := range shapes[1:] {
+		if sh != shapes[0] {
+			t.Fatalf("shapes differ: %q vs %q", shapes[0], sh)
+		}
 	}
-	a := m.Items[0]
-	if a.Children[0].Action != "open:/Users/x/Volumes/a" || a.Children[1].Action != "sync:a" || a.Children[2].Action != "disconnect:a" || !strings.Contains(a.Children[3].Title, "2 upload") {
-		t.Errorf("a children = %+v", a.Children)
-	}
-	c := m.Items[2]
-	if c.Children[0].Action != "connect:c" || !strings.Contains(c.Children[1].Title, "hung") {
-		t.Errorf("c children = %+v", c.Children)
-	}
-	d := m.Items[3]
-	if !strings.Contains(d.Children[len(d.Children)-1].Title, "Change pending: disconnect (uploads pending)") {
-		t.Errorf("d children = %+v", d.Children)
+}
+
+func checkSeparators(t *testing.T, what string, items []Item) {
+	t.Helper()
+	v := visible(items)
+	for i, it := range v {
+		if it.Separator && (i == 0 || i == len(v)-1 || v[i-1].Separator) {
+			t.Errorf("%s: separator misplaced in %s", what, titles(items))
+		}
+		checkSeparators(t, what+" > "+it.Title, it.Children)
 	}
 }
 
 func TestBuildConfigError(t *testing.T) {
 	m := Build(ipc.Status{ConfigOK: false, ConfigError: "line 3: mount \"x\".type: unknown backend type \"ftpx\"\nline 9: ..."})
-	if !strings.HasPrefix(m.Items[0].Title, "Config error: line 3") || strings.Contains(m.Items[0].Title, "line 9") {
-		t.Errorf("config error item = %q", m.Items[0].Title)
+	if !strings.HasPrefix(m.Items[0].Title, "Config error: line 3") || strings.Contains(m.Items[0].Title, "line 9") || !strings.Contains(m.Items[0].Tooltip, "line 9") {
+		t.Errorf("config error item = %+v", m.Items[0])
+	}
+	if got := titles(m.Items); !strings.Contains(got, "|---|Settings…|Edit Config File|") {
+		t.Errorf("config error menu = %s", got)
 	}
 	if string(m.Icon) != string(icon("error")) {
 		t.Error("config error must use the warning icon")
@@ -61,7 +140,10 @@ func TestBuildConfigError(t *testing.T) {
 
 func TestBuildFirstRun(t *testing.T) {
 	m := Build(ipc.Status{ConfigOK: false, ConfigError: "no config file yet at /x/config.toml", ConfigMissing: true})
-	if m.Items[0].Title != "Set up Lagra…" || m.Items[0].Action != "settings" {
+	if got := titles(m.Items); got != "Set Up Lagra…|---|Show Logs in Finder|---|Quit Lagra" {
+		t.Errorf("first run menu = %s", got)
+	}
+	if m.Items[0].Action != "settings" {
 		t.Errorf("first run item = %+v", m.Items[0])
 	}
 	if string(m.Icon) != string(icon("idle")) {
@@ -69,10 +151,33 @@ func TestBuildFirstRun(t *testing.T) {
 	}
 }
 
+func TestBuildNoStorages(t *testing.T) {
+	m := Build(ipc.Status{ConfigOK: true})
+	if got := titles(m.Items); got != "No storages yet|---|Settings…|Edit Config File|Reload Config|Show Logs in Finder|---|Quit Lagra" {
+		t.Errorf("empty menu = %s", got)
+	}
+}
+
+func TestConnectAllOnlyWhenSomethingToConnect(t *testing.T) {
+	m := Build(ipc.Status{ConfigOK: true, Mounts: []engine.Snapshot{
+		{Name: "a", State: engine.Connected, Enabled: true},
+		{Name: "b", State: engine.Offline, Enabled: true},
+		{Name: "c", State: engine.Disconnected, Enabled: false},
+	}})
+	if !find(t, m.Items, "Connect All").Disabled {
+		t.Error("Connect All has nothing to do: connect leaves offline storages alone and c is off")
+	}
+}
+
 func TestIconsRender(t *testing.T) {
 	for _, k := range []string{"ok", "idle", "partial", "error"} {
 		if b := icon(k); len(b) < 100 || string(b[1:4]) != "PNG" {
 			t.Errorf("icon %s not a PNG (%d bytes)", k, len(b))
+		}
+	}
+	for _, k := range []string{"ok", "busy", "warn", "bad", "idle"} {
+		if b := dotIcon(k); len(b) < 50 || string(b[1:4]) != "PNG" {
+			t.Errorf("dot %s not a PNG (%d bytes)", k, len(b))
 		}
 	}
 }
